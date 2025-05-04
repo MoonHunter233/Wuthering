@@ -7,6 +7,7 @@ struct RouteEntry {
   std::string netmask;
   std::string gateway;
   std::string iface;
+  int metric;
 };
 
 class IRouteProvider {
