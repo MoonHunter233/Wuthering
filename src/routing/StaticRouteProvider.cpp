@@ -9,7 +9,8 @@ bool StaticRouteProvider::loadFromFile(const std::string &path) {
   if (!in) {
     std::cerr << "Failed to open route config: " << path << std::endl;
     return false;
-  }
+  } else
+    std::cout << "Load route config" << std::endl;
 
   std::string line;
   while (std::getline(in, line)) {

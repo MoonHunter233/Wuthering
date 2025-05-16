@@ -83,7 +83,8 @@ int main() {
       if (!route) {
         std::cout << "[Router] No route for " << dstIp << "\n";
         continue;
-      }
+      } else
+        std::cout << "[Router] <<< " << dstIp << "\n";
       auto snatted = nat.applySNAT(*packet);
       cap.writePacket(snatted); // 发往外网
     }
