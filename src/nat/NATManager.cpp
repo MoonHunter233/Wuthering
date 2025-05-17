@@ -36,7 +36,9 @@ std::vector<uint8_t> NATManager::applySNAT(const std::vector<uint8_t> &packet) {
     srcPort = ntohs(udp->source);
   }
 
-  std::string srcIp = inet_ntoa(*(in_addr *)&ip->saddr);
+  in_addr src;
+  src.s_addr = ip->saddr;
+  std::string srcIp = inet_ntoa(src);
 
   const struct ip *iph = reinterpret_cast<const struct ip *>(modified.data());
   std::cout << "test" << std::string(inet_ntoa(iph->ip_src)) << "\n";
