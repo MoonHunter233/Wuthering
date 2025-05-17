@@ -12,13 +12,19 @@
 #include <netinet/ip.h>
 
 std::string extractDstIp(const std::vector<uint8_t> &packet) {
-  const struct ip *iph = reinterpret_cast<const struct ip *>(packet.data());
-  return std::string(inet_ntoa(iph->ip_dst));
+  const struct iphdr *iph =
+      reinterpret_cast<const struct iphdr *>(packet.data());
+  in_addr dst;
+  dst.s_addr = iph->daddr;
+  return std::string(inet_ntoa(dst));
 }
 
 std::string extractSrcIp(const std::vector<uint8_t> &packet) {
-  const struct ip *iph = reinterpret_cast<const struct ip *>(packet.data());
-  return std::string(inet_ntoa(iph->ip_src));
+  const struct iphdr *iph =
+      reinterpret_cast<const struct iphdr *>(packet.data());
+  in_addr src;
+  src.s_addr = iph->saddr;
+  return std::string(inet_ntoa(src));
 }
 
 bool isFromLan(const std::string &ip) {
