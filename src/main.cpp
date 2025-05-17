@@ -12,6 +12,7 @@
 #include <memory>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <thread>
 #include <unordered_map>
 
@@ -65,7 +66,6 @@ int main() {
   qos.loadRules("config/qos.rules");
 
   std::unordered_map<std::string, std::unique_ptr<TcpRelay>> relayMap;
-
   std::cout << "[Router] System started.\n";
 
   std::thread rawListener([&]() {
@@ -73,74 +73,101 @@ int main() {
       auto rawPkt = cap.readRawPacket();
       if (!rawPkt)
         continue;
-
       auto dnatted = nat.applyDNAT(*rawPkt);
       cap.writeToTun(dnatted);
     }
   });
 
+  int tunFd = cap.getTunFd();
+
   while (true) {
-    auto packet = cap.readPacket();
-    if (!packet)
-      continue;
+    std::vector<struct pollfd> pfds;
 
-    const std::string srcIp = extractSrcIp(*packet);
-    const std::string dstIp = extractDstIp(*packet);
-    const struct iphdr *iph =
-        reinterpret_cast<const struct iphdr *>(packet->data());
-    uint8_t proto = iph->protocol;
+    // 监视 TUN 设备
+    pfds.push_back({tunFd, POLLIN, 0});
 
-    std::cout << "[Cap] From " << srcIp << " to " << dstIp << "\n";
-
-    if (!firewall.allow(*packet)) {
-      std::cout << "[Firewall] Blocked packet from " << srcIp << " to " << dstIp
-                << "\n";
-      continue;
+    // 监视每个 relay 的 socket fd
+    std::vector<std::string> keys;
+    for (auto &[key, relay] : relayMap) {
+      int fd = relay->getSocketFd();
+      if (fd >= 0) {
+        pfds.push_back({fd, POLLIN, 0});
+        keys.push_back(key);
+      }
     }
 
-    if (!qos.allow(*packet)) {
-      std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
-      continue;
+    int ret = poll(pfds.data(), pfds.size(), 100);
+    if (ret < 0) {
+      perror("poll");
+      break;
     }
 
-    if (isFromLan(srcIp) && !isFromLan(dstIp)) {
-      auto route = router.lookupRoute(dstIp);
-      if (!route) {
-        std::cout << "[Router] No route for " << dstIp << "\n";
+    // TUN 接收到新包
+    if (pfds[0].revents & POLLIN) {
+      auto packet = cap.readPacket();
+      if (!packet)
+        continue;
+
+      std::string srcIp = extractSrcIp(*packet);
+      std::string dstIp = extractDstIp(*packet);
+      const struct iphdr *iph =
+          reinterpret_cast<const struct iphdr *>(packet->data());
+      uint8_t proto = iph->protocol;
+
+      std::cout << "[Cap] From " << srcIp << " to " << dstIp << "\n";
+
+      if (!firewall.allow(*packet)) {
+        std::cout << "[Firewall] Blocked packet from " << srcIp << " to "
+                  << dstIp << "\n";
+        continue;
+      }
+      if (!qos.allow(*packet)) {
+        std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
         continue;
       }
 
-      std::cout << "[Router] <<< " << srcIp << "\n";
-      auto snatted = nat.applySNAT(*packet);
-
-      // 创建或查找 relay
-      uint16_t dstPort = 0;
-      if (proto == IPPROTO_TCP &&
-          packet->size() >= iph->ihl * 4 + sizeof(tcphdr)) {
-        auto *tcp =
-            reinterpret_cast<const tcphdr *>(packet->data() + iph->ihl * 4);
-        dstPort = ntohs(tcp->dest);
-      }
-      std::string key = makeRelayKey(dstIp, dstPort, proto);
-
-      if (relayMap.find(key) == relayMap.end()) {
-        auto relay = std::make_unique<TcpRelay>(dstIp, dstPort);
-        if (!relay->isConnected()) {
-          std::cout << "[Relay] Failed to connect to " << dstIp << ":"
-                    << dstPort << "\n";
+      if (isFromLan(srcIp) && !isFromLan(dstIp)) {
+        auto route = router.lookupRoute(dstIp);
+        if (!route) {
+          std::cout << "[Router] No route for " << dstIp << "\n";
           continue;
         }
-        relayMap[key] = std::move(relay);
-      }
 
-      relayMap[key]->sendFromTun(snatted);
+        std::cout << "[Router] <<< " << srcIp << "\n";
+        auto snatted = nat.applySNAT(*packet);
 
-      auto back = relayMap[key]->receiveFromSocket();
-      if (back) {
-        cap.writePacket(*back);
+        uint16_t dstPort = 0;
+        if (proto == IPPROTO_TCP &&
+            packet->size() >= iph->ihl * 4 + sizeof(tcphdr)) {
+          auto *tcp =
+              reinterpret_cast<const tcphdr *>(packet->data() + iph->ihl * 4);
+          dstPort = ntohs(tcp->dest);
+        }
+        std::string key = makeRelayKey(dstIp, dstPort, proto);
+
+        if (relayMap.find(key) == relayMap.end()) {
+          auto relay = std::make_unique<TcpRelay>(dstIp, dstPort);
+          if (!relay->isConnected()) {
+            std::cout << "[Relay] Failed to connect to " << dstIp << ":"
+                      << dstPort << "\n";
+            continue;
+          }
+          relayMap[key] = std::move(relay);
+        }
+        relayMap[key]->sendFromTun(snatted);
+      } else {
+        cap.writePacket(*packet);
       }
-    } else {
-      cap.writePacket(*packet);
+    }
+
+    // 检查 relay 中的 socket 是否有数据返回
+    for (size_t i = 1; i < pfds.size(); ++i) {
+      if (pfds[i].revents & POLLIN) {
+        auto &relay = relayMap[keys[i - 1]];
+        auto back = relay->receiveFromSocket();
+        if (back)
+          cap.writePacket(*back);
+      }
     }
   }
 
