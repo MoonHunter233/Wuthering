@@ -1,11 +1,20 @@
 #!/bin/bash
-DEV=tun0
-TUN_NET=192.168.99.0/24
-# OUTIF=wlan0  # 或者 eth0，看你实际的网络设备
+set -e
 
-# 创建并配置 tun0
-ip tuntap add dev $DEV mode tun
-ip link set dev $DEV up
+TUN_NAME="tun0"
 
-# 启用转发
-echo 1 > /proc/sys/net/ipv4/ip_forward
+echo "[+] 创建 TUN 接口 $TUN_NAME"
+
+# 检查 /dev/net/tun 是否存在
+# if [ ! -c /dev/net/tun ]; then
+#     echo "[-] /dev/net/tun 不存在，请加载 tun 模块：sudo modprobe tun"
+#     exit 1
+# fi
+
+# 创建 TUN 接口
+sudo ip tuntap add dev $TUN_NAME mode tun
+
+# 启用接口（无需设置 IP）
+sudo ip link set $TUN_NAME up
+
+echo "[✓] $TUN_NAME 已启用（不绑定 IP，供程序监听）"
