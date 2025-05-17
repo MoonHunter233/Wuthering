@@ -90,6 +90,7 @@ int main() {
     }
     // 入站回包（来自公网）
     else {
+      std::cout << "[Router] >>> " << dstIp << "\n";
       auto dnatted = nat.applyDNAT(*packet);
       cap.writePacket(dnatted); // 发回内网
     }
