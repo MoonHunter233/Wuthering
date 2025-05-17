@@ -21,12 +21,6 @@ std::string NATManager::makeNatKey(const std::string &ip, uint16_t port,
 }
 
 std::vector<uint8_t> NATManager::applySNAT(const std::vector<uint8_t> &packet) {
-  const struct iphdr *iph =
-      reinterpret_cast<const struct iphdr *>(packet.data());
-  in_addr sr;
-  sr.s_addr = iph->saddr;
-  std::cout << "test:" << std::string(inet_ntoa(sr)) << "\n";
-
   std::vector<uint8_t> modified = packet;
   iphdr *ip = reinterpret_cast<iphdr *>(modified.data());
 
