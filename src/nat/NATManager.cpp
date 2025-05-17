@@ -20,6 +20,11 @@ std::string NATManager::makeNatKey(const std::string &ip, uint16_t port,
   return ip + ":" + std::to_string(port) + ":" + std::to_string(protocol);
 }
 
+std::string NATManager::makeReverseKey(const std::string &ip, uint16_t port,
+                                       uint8_t protocol) {
+  return ip + ":" + std::to_string(port) + ":" + std::to_string(protocol);
+}
+
 std::vector<uint8_t> NATManager::applySNAT(const std::vector<uint8_t> &packet) {
   std::vector<uint8_t> modified = packet;
   iphdr *ip = reinterpret_cast<iphdr *>(modified.data());
@@ -39,20 +44,46 @@ std::vector<uint8_t> NATManager::applySNAT(const std::vector<uint8_t> &packet) {
   in_addr src;
   src.s_addr = ip->saddr;
   std::string srcIp = inet_ntoa(src);
+  std::string reverseKey = makeReverseKey(srcIp, srcPort, proto);
 
   std::cout << "[SNAT] Original src:" << srcIp << ":" << srcPort
             << ",protocol:" << (int)proto << "\n";
 
-  uint16_t externalPort = allocateExternalPort();
-  natTable_[makeNatKey(publicIp_, externalPort, proto)] =
-      NATEntry{srcIp, srcPort, publicIp_, externalPort, proto};
+  // 如果已存在映射，直接复用
+  if (reverseTable_.count(reverseKey)) {
+    std::string existingNatKey = reverseTable_[reverseKey];
+    const NATEntry &entry = natTable_[existingNatKey];
 
-  // 替换 IP
+    in_addr newAddr;
+    inet_aton(entry.externalIp.c_str(), &newAddr);
+    ip->saddr = newAddr.s_addr;
+
+    if (proto == IPPROTO_TCP) {
+      tcphdr *tcp = reinterpret_cast<tcphdr *>(modified.data() + ip->ihl * 4);
+      tcp->source = htons(entry.externalPort);
+    } else if (proto == IPPROTO_UDP) {
+      udphdr *udp = reinterpret_cast<udphdr *>(modified.data() + ip->ihl * 4);
+      udp->source = htons(entry.externalPort);
+    }
+
+    ip->check = 0;
+    ip->check = ipChecksum(ip, ip->ihl * 4);
+
+    std::cout << "[SNAT] Reused mapping: " << entry.externalIp << ":"
+              << entry.externalPort << "\n";
+    return modified;
+  }
+
+  // 分配新端口并创建映射
+  uint16_t externalPort = allocateExternalPort();
+  std::string natKey = makeNatKey(publicIp_, externalPort, proto);
+  natTable_[natKey] = NATEntry{srcIp, srcPort, publicIp_, externalPort, proto};
+  reverseTable_[reverseKey] = natKey;
+
   in_addr newAddr;
   inet_aton(publicIp_.c_str(), &newAddr);
   ip->saddr = newAddr.s_addr;
 
-  // 替换端口
   if (proto == IPPROTO_TCP) {
     tcphdr *tcp = reinterpret_cast<tcphdr *>(modified.data() + ip->ihl * 4);
     tcp->source = htons(externalPort);
@@ -61,11 +92,10 @@ std::vector<uint8_t> NATManager::applySNAT(const std::vector<uint8_t> &packet) {
     udp->source = htons(externalPort);
   }
 
-  std::cout << "[SNAT] Mapped to: " << publicIp_ << ":" << externalPort << "\n";
-
   ip->check = 0;
   ip->check = ipChecksum(ip, ip->ihl * 4);
 
+  std::cout << "[SNAT] Mapped to: " << publicIp_ << ":" << externalPort << "\n";
   return modified;
 }
 
@@ -86,14 +116,10 @@ std::vector<uint8_t> NATManager::applyDNAT(const std::vector<uint8_t> &packet) {
   }
 
   std::string dstIp = inet_ntoa(*(in_addr *)&ip->daddr);
+  std::string key = makeNatKey(dstIp, dstPort, proto);
 
-  // std::cout << "[DNAT] Received dst: " << dstIp << ":" << dstPort
-  //           << ", protocol: " << (int)proto << "\n";
-
-  auto it = natTable_.find(makeNatKey(dstIp, dstPort, proto));
+  auto it = natTable_.find(key);
   if (it == natTable_.end()) {
-    // std::cout << "[DNAT] No NAT mapping found for key "
-    //           << makeNatKey(dstIp, dstPort, proto) << "\n";
     return packet; // 没找到映射，不处理
   }
 
@@ -102,12 +128,10 @@ std::vector<uint8_t> NATManager::applyDNAT(const std::vector<uint8_t> &packet) {
   std::cout << "[DNAT] Matched mapping: " << entry.internalIp << ":"
             << entry.internalPort << "\n";
 
-  // 还原 IP
   in_addr newAddr;
   inet_aton(entry.internalIp.c_str(), &newAddr);
   ip->daddr = newAddr.s_addr;
 
-  // 还原端口
   if (proto == IPPROTO_TCP) {
     tcphdr *tcp = reinterpret_cast<tcphdr *>(modified.data() + ip->ihl * 4);
     tcp->dest = htons(entry.internalPort);

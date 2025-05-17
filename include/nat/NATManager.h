@@ -21,9 +21,12 @@ public:
 
 private:
   std::string publicIp_;
-  std::unordered_map<std::string, NATEntry> natTable_;
+  std::unordered_map<std::string, NATEntry> natTable_; // 外部 → 内部
+  std::unordered_map<std::string, std::string> reverseTable_; // 内部 → 外部 key
 
   uint16_t allocateExternalPort();
   std::string makeNatKey(const std::string &ip, uint16_t port,
                          uint8_t protocol);
+  std::string makeReverseKey(const std::string &ip, uint16_t port,
+                             uint8_t protocol);
 };
