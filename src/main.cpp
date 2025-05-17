@@ -99,7 +99,7 @@ int main() {
     int ret = poll(pfds.data(), pfds.size(), 100);
     if (ret < 0) {
       perror("poll");
-      break;
+      continue;
     }
 
     // TUN 接收到新包
