@@ -67,13 +67,10 @@ int main() {
     if (!packet)
       continue;
 
-    std::cout << "test0:" << extractSrcIp(*packet) << "\n";
-
     const std::string srcIp = extractSrcIp(*packet);
     const std::string dstIp = extractDstIp(*packet);
 
-    std::cout << "test0:" << extractSrcIp(*packet) << "\n";
-    std::cout << "test0:" << srcIp << "\n";
+    std::cout << "[Cap] From " << srcIp << " to " << dstIp << "\n";
 
     // 防火墙过滤
     if (!firewall.allow(*packet)) {
@@ -88,24 +85,19 @@ int main() {
       continue;
     }
 
-    std::cout << "test1:" << extractSrcIp(*packet) << "\n";
-
-    // 出站流量（来自内网）
-    if (isFromLan(srcIp)) {
-      std::cout << "test2:" << extractSrcIp(*packet) << "\n";
+    // 出站流量（内网 -> 公网）
+    if (isFromLan(srcIp) && !isFromLan(dstIp)) {
       auto route = router.lookupRoute(dstIp);
-      std::cout << "test3:" << extractSrcIp(*packet) << "\n";
       if (!route) {
         std::cout << "[Router] No route for " << dstIp << "\n";
         continue;
       }
-      std::cout << "[Router] <<< " << dstIp << "\n";
-      std::cout << "test:" << extractSrcIp(*packet) << "\n";
+      std::cout << "[Router] <<< " << srcIp << "\n";
       auto snatted = nat.applySNAT(*packet);
       cap.writePacket(snatted); // 发往外网
     }
-    // 入站回包（来自公网）
-    else {
+    // 入站回包（公网 -> 内网）
+    else if (!isFromLan(srcIp)) {
       std::cout << "[Router] >>> " << dstIp << "\n";
       auto dnatted = nat.applyDNAT(*packet);
       cap.writePacket(dnatted); // 发回内网
