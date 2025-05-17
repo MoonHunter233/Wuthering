@@ -100,3 +100,5 @@ bool PacketCapture::writeToTun(const std::vector<uint8_t> &packet) {
 }
 
 std::string PacketCapture::getInterfaceName() const { return ifName_; }
+
+int PacketCapture::getTunFd() const { return tunFd_; }

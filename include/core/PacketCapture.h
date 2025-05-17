@@ -13,6 +13,7 @@ public:
   writePacket(const std::vector<uint8_t> &packet); // 发往外网（raw socket）
   bool writeToTun(const std::vector<uint8_t> &packet); // 写回 TUN（发回客户端）
   std::string getInterfaceName() const;
+  int getTunFd() const;
 
 private:
   int tunFd_ = -1;
