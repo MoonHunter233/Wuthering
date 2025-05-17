@@ -69,11 +69,6 @@ int main() {
       if (!rawPkt)
         continue;
 
-      const std::string srcIp = extractSrcIp(*rawPkt);
-      const std::string dstIp = extractDstIp(*rawPkt);
-
-      std::cout << "[Cap] From " << srcIp << " to " << dstIp << "\n";
-
       auto dnatted = nat.applyDNAT(*rawPkt);
       cap.writeToTun(dnatted);
     }
