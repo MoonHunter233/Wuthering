@@ -89,10 +89,10 @@ int main() {
       if (!route) {
         std::cout << "[Router] No route for " << dstIp << "\n";
         continue;
-      } else
-        std::cout << "[Router] <<< " << dstIp << "\n";
-      std::vector<uint8_t> rawPacket = *packet;
-      auto snatted = nat.applySNAT(rawPacket);
+      }
+      std::cout << "[Router] <<< " << dstIp << "\n";
+      std::cout << "test:" << extractSrcIp(*packet) << "\n";
+      auto snatted = nat.applySNAT(*packet);
       cap.writePacket(snatted); // 发往外网
     }
     // 入站回包（来自公网）
