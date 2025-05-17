@@ -83,9 +83,13 @@ int main() {
       continue;
     }
 
+    std::cout << "test1:" << extractSrcIp(*packet) << "\n";
+
     // 出站流量（来自内网）
     if (isFromLan(srcIp)) {
+      std::cout << "test2:" << extractSrcIp(*packet) << "\n";
       auto route = router.lookupRoute(dstIp);
+      std::cout << "test3:" << extractSrcIp(*packet) << "\n";
       if (!route) {
         std::cout << "[Router] No route for " << dstIp << "\n";
         continue;
