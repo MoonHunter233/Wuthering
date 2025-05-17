@@ -10,6 +10,7 @@
 #include <iostream>
 #include <memory>
 #include <netinet/ip.h>
+#include <thread>
 
 std::string extractDstIp(const std::vector<uint8_t> &packet) {
   const struct iphdr *iph =
@@ -61,7 +62,19 @@ int main() {
 
   std::cout << "[Router] System started.\n";
 
-  // 主循环
+  // 回包监听线程（从 raw socket 接收并写入 tun0）
+  std::thread rawListener([&]() {
+    while (true) {
+      auto rawPkt = cap.readRawPacket();
+      if (!rawPkt)
+        continue;
+
+      auto dnatted = nat.applyDNAT(*rawPkt);
+      cap.writeToTun(dnatted);
+    }
+  });
+
+  // 主循环处理来自 tun0 的出站流量
   while (true) {
     auto packet = cap.readPacket();
     if (!packet)
@@ -95,18 +108,12 @@ int main() {
       std::cout << "[Router] <<< " << srcIp << "\n";
       auto snatted = nat.applySNAT(*packet);
       cap.writePacket(snatted); // 发往外网
-    }
-    // 入站回包（公网 -> 内网）
-    else if (!isFromLan(srcIp)) {
-      std::cout << "[Router] >>> " << dstIp << "\n";
-      auto dnatted = nat.applyDNAT(*packet);
-      cap.writePacket(dnatted); // 发回内网
     } else {
-      cap.writePacket(*packet);
+      cap.writePacket(*packet); // 非公网目的地，原样发出
     }
   }
 
-  // 优雅退出（通常不会到这一步）
   dynamicRouter->stop();
+  rawListener.join();
   return 0;
 }
