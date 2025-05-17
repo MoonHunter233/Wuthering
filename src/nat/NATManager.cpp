@@ -87,13 +87,13 @@ std::vector<uint8_t> NATManager::applyDNAT(const std::vector<uint8_t> &packet) {
 
   std::string dstIp = inet_ntoa(*(in_addr *)&ip->daddr);
 
-  std::cout << "[DNAT] Received dst: " << dstIp << ":" << dstPort
-            << ", protocol: " << (int)proto << "\n";
+  // std::cout << "[DNAT] Received dst: " << dstIp << ":" << dstPort
+  //           << ", protocol: " << (int)proto << "\n";
 
   auto it = natTable_.find(makeNatKey(dstIp, dstPort, proto));
   if (it == natTable_.end()) {
-    std::cout << "[DNAT] No NAT mapping found for key "
-              << makeNatKey(dstIp, dstPort, proto) << "\n";
+    // std::cout << "[DNAT] No NAT mapping found for key "
+    //           << makeNatKey(dstIp, dstPort, proto) << "\n";
     return packet; // 没找到映射，不处理
   }
 
