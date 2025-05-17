@@ -45,7 +45,7 @@ int main() {
 
   // 初始化 NAT、防火墙、QoS
   NATManager nat;
-  nat.setPublicIp("192.168.99.1");
+  nat.setPublicIp("192.168.137.153");
 
   Firewall firewall;
   firewall.loadRules("config/firewall.rules");
