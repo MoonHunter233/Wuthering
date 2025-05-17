@@ -7,11 +7,15 @@
 class PacketCapture {
 public:
   bool init(const std::string &devName = "tun0");
-  std::optional<std::vector<uint8_t>> readPacket();
-  bool writePacket(const std::vector<uint8_t> &packet);
+  std::optional<std::vector<uint8_t>> readPacket(); // 从 TUN 读取
+  std::optional<std::vector<uint8_t>> readRawPacket(); // 从 raw socket 读取回包
+  bool
+  writePacket(const std::vector<uint8_t> &packet); // 发往外网（raw socket）
+  bool writeToTun(const std::vector<uint8_t> &packet); // 写回 TUN（发回客户端）
   std::string getInterfaceName() const;
 
 private:
   int tunFd_ = -1;
+  int rawFd_ = -1;
   std::string ifName_;
 };

@@ -2,6 +2,7 @@
 set -e
 
 TUN_NAME="tun0"
+OUT_IF="wlan0"
 
 echo "[+] 创建 TUN 接口 $TUN_NAME"
 
@@ -16,5 +17,10 @@ sudo ip tuntap add dev $TUN_NAME mode tun
 
 # 启用接口（无需设置 IP）
 sudo ip link set $TUN_NAME up
+
+# 启用转发
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+sudo iptables -t nat -A POSTROUTING -o $OUT_IF -j MASQUERADE
 
 echo "[✓] $TUN_NAME 已启用（不绑定 IP，供程序监听）"
