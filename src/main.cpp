@@ -73,6 +73,7 @@ int main() {
     const std::string dstIp = extractDstIp(*packet);
 
     std::cout << "test0:" << extractSrcIp(*packet) << "\n";
+    std::cout << "test0:" << srcIp << "\n";
 
     // 防火墙过滤
     if (!firewall.allow(*packet)) {
