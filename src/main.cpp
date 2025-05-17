@@ -3,6 +3,7 @@
 #include "core/RoutingManager.h"
 #include "firewall/Firewall.h"
 #include "nat/NATManager.h"
+#include "relay/TcpRelay.h"
 #include "routing/DynamicRouteProvider.h"
 #include "routing/StaticRouteProvider.h"
 
@@ -11,6 +12,7 @@
 #include <memory>
 #include <netinet/ip.h>
 #include <thread>
+#include <unordered_map>
 
 std::string extractDstIp(const std::vector<uint8_t> &packet) {
   const struct iphdr *iph =
@@ -33,13 +35,15 @@ bool isFromLan(const std::string &ip) {
          ip.rfind("172.", 0) == 0;
 }
 
+std::string makeRelayKey(const std::string &ip, uint16_t port, uint8_t proto) {
+  return ip + ":" + std::to_string(port) + ":" + std::to_string(proto);
+}
+
 int main() {
-  // 初始化监听接口
   PacketCapture cap;
   if (!cap.init("tun0"))
     return 1;
 
-  // 初始化路由系统
   RoutingManager router;
   auto staticRouter = std::make_shared<StaticRouteProvider>();
   staticRouter->loadFromFile("config/routes.conf");
@@ -50,7 +54,6 @@ int main() {
   dynamicRouter->start();
   router.addProvider(dynamicRouter);
 
-  // 初始化 NAT、防火墙、QoS
   NATManager nat;
   nat.setPublicIp("192.168.137.153");
 
@@ -60,9 +63,10 @@ int main() {
   QoSManager qos;
   qos.loadRules("config/qos.rules");
 
+  std::unordered_map<std::string, std::unique_ptr<TcpRelay>> relayMap;
+
   std::cout << "[Router] System started.\n";
 
-  // 回包监听线程（从 raw socket 接收并写入 tun0）
   std::thread rawListener([&]() {
     while (true) {
       auto rawPkt = cap.readRawPacket();
@@ -74,7 +78,6 @@ int main() {
     }
   });
 
-  // 主循环处理来自 tun0 的出站流量
   while (true) {
     auto packet = cap.readPacket();
     if (!packet)
@@ -82,34 +85,61 @@ int main() {
 
     const std::string srcIp = extractSrcIp(*packet);
     const std::string dstIp = extractDstIp(*packet);
+    const struct iphdr *iph =
+        reinterpret_cast<const struct iphdr *>(packet->data());
+    uint8_t proto = iph->protocol;
 
     std::cout << "[Cap] From " << srcIp << " to " << dstIp << "\n";
 
-    // 防火墙过滤
     if (!firewall.allow(*packet)) {
       std::cout << "[Firewall] Blocked packet from " << srcIp << " to " << dstIp
                 << "\n";
       continue;
     }
 
-    // QoS 限速判断
     if (!qos.allow(*packet)) {
       std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
       continue;
     }
 
-    // 出站流量（内网 -> 公网）
     if (isFromLan(srcIp) && !isFromLan(dstIp)) {
       auto route = router.lookupRoute(dstIp);
       if (!route) {
         std::cout << "[Router] No route for " << dstIp << "\n";
         continue;
       }
+
       std::cout << "[Router] <<< " << srcIp << "\n";
       auto snatted = nat.applySNAT(*packet);
-      cap.writePacket(snatted); // 发往外网
+
+      // 创建或查找 relay
+      uint16_t dstPort = 0;
+      if (proto == IPPROTO_TCP &&
+          packet->size() >= iph->ihl * 4 + sizeof(tcphdr)) {
+        auto *tcp =
+            reinterpret_cast<const tcphdr *>(packet->data() + iph->ihl * 4);
+        dstPort = ntohs(tcp->dest);
+      }
+      std::string key = makeRelayKey(dstIp, dstPort, proto);
+
+      if (relayMap.find(key) == relayMap.end()) {
+        auto relay = std::make_unique<TcpRelay>(dstIp, dstPort);
+        if (!relay->isConnected()) {
+          std::cout << "[Relay] Failed to connect to " << dstIp << ":"
+                    << dstPort << "\n";
+          continue;
+        }
+        relayMap[key] = std::move(relay);
+      }
+
+      relayMap[key]->sendFromTun(snatted);
+
+      auto back = relayMap[key]->receiveFromSocket();
+      if (back) {
+        cap.writePacket(*back);
+      }
     } else {
-      cap.writePacket(*packet); // 非公网目的地，原样发出
+      cap.writePacket(*packet);
     }
   }
 
