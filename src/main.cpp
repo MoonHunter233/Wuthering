@@ -91,7 +91,8 @@ int main() {
         continue;
       } else
         std::cout << "[Router] <<< " << dstIp << "\n";
-      auto snatted = nat.applySNAT(*packet);
+      std::vector<uint8_t> rawPacket = *packet;
+      auto snatted = nat.applySNAT(rawPacket);
       cap.writePacket(snatted); // 发往外网
     }
     // 入站回包（来自公网）
