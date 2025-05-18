@@ -28,5 +28,5 @@ public:
 private:
   int sockFd_ = -1;
   std::string relayKey_;
-  NATManager *nat_ = nullptr;
+  NATManager &natManager_;
 };

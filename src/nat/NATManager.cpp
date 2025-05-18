@@ -10,6 +10,8 @@ static uint16_t ipChecksum(void *vdata, size_t length);
 
 void NATManager::setPublicIp(const std::string &ip) { publicIp_ = ip; }
 
+std::string NATManager::getPublicIp() { return publicIp_; }
+
 uint16_t NATManager::allocateExternalPort() {
   static uint16_t port = 40000;
   return port++;
