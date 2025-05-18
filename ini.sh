@@ -22,6 +22,7 @@ sudo ip link set $TUN_NAME up
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
 sudo iptables -t nat -A POSTROUTING -o $OUT_IF -j MASQUERADE
-sudo iptables -A OUTPUT -p tcp --tcp-flags RST RST --sport 40000:41000 -j DROP
+
+sudo iptables -A OUTPUT -p tcp --tcp-flags RST RST --sport 40000:50000 -j DROP
 
 echo "[✓] $TUN_NAME 已启用（不绑定 IP，供程序监听）"

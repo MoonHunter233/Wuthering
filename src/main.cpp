@@ -146,7 +146,7 @@ int main() {
         std::string key = makeRelayKey(dstIp, dstPort, proto);
 
         if (relayMap.find(key) == relayMap.end()) {
-          auto relay = std::make_unique<TcpRelay>(dstIp, dstPort);
+          auto relay = std::make_unique<TcpRelay>(dstIp, dstPort, nat, key);
           if (!relay->isConnected()) {
             std::cout << "[Relay] Failed to connect to " << dstIp << ":"
                       << dstPort << "\n";
@@ -154,7 +154,7 @@ int main() {
           }
           relayMap[key] = std::move(relay);
         }
-        relayMap[key]->sendFromTun(snatted);
+        relayMap[key]->sendPayload(snatted);
       } else {
         cap.writePacket(*packet);
       }
@@ -164,7 +164,7 @@ int main() {
     for (size_t i = 1; i < pfds.size(); ++i) {
       if (pfds[i].revents & POLLIN) {
         auto &relay = relayMap[keys[i - 1]];
-        auto back = relay->receiveFromSocket();
+        auto back = relay->receivePayload();
         if (back)
           cap.writePacket(*back);
       }

@@ -77,8 +77,10 @@ std::vector<uint8_t> NATManager::applySNAT(const std::vector<uint8_t> &packet) {
   // 分配新端口并创建映射
   uint16_t externalPort = allocateExternalPort();
   std::string natKey = makeNatKey(publicIp_, externalPort, proto);
-  natTable_[natKey] = NATEntry{srcIp, srcPort, publicIp_, externalPort, proto};
+  NATEntry entry{srcIp, srcPort, publicIp_, externalPort, proto};
+  natTable_[natKey] = entry;
   reverseTable_[reverseKey] = natKey;
+  relayReverseTable_[natKey] = entry; // 为 relay 模块服务
 
   in_addr newAddr;
   inet_aton(publicIp_.c_str(), &newAddr);
@@ -144,6 +146,16 @@ std::vector<uint8_t> NATManager::applyDNAT(const std::vector<uint8_t> &packet) {
   ip->check = ipChecksum(ip, ip->ihl * 4);
 
   return modified;
+}
+
+bool NATManager::getOriginalSource(const std::string &relayKey, std::string &ip,
+                                   uint16_t &port) {
+  auto it = relayReverseTable_.find(relayKey);
+  if (it == relayReverseTable_.end())
+    return false;
+  ip = it->second.internalIp;
+  port = it->second.internalPort;
+  return true;
 }
 
 static uint16_t ipChecksum(void *vdata, size_t length) {
