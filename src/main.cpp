@@ -165,8 +165,13 @@ int main() {
       if (pfds[i].revents & POLLIN) {
         auto &relay = relayMap[keys[i - 1]];
         auto back = relay->receivePayload();
-        if (back)
+        if (back) {
           cap.writePacket(*back);
+        } else {
+          std::cout << "[Relay] Connection closed or failed for key: "
+                    << keys[i - 1] << ", removing.\n";
+          relayMap.erase(keys[i - 1]);
+        }
       }
     }
   }
