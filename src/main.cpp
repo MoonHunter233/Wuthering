@@ -104,18 +104,18 @@ int main() {
         continue;
       }
 
+      auto route = router.lookupRoute(dstIp);
+      if (!route) {
+        std::cout << "[Router] No route for " << dstIp << "\n";
+        continue;
+      }
       if (isFromLan(srcIp) && !isFromLan(dstIp)) {
-        auto route = router.lookupRoute(dstIp);
-        if (!route) {
-          std::cout << "[Router] No route for " << dstIp << "\n";
-          continue;
-        }
+        auto snatted = nat.applySNAT(*packet);
+        cap.writePacket(snatted);
+      } else {
         std::cout << "[Router] Route to " << dstIp << " via " << route->gateway
                   << " on " << route->iface << "\n";
-        auto snatted = nat.applySNAT(*packet);
-        cap.sendViaInterface(snatted, route->gateway, route->iface);
-      } else {
-        cap.writePacket(*packet);
+        cap.sendViaInterface(*packet, route->gateway, route->iface);
       }
     }
   }
