@@ -7,21 +7,12 @@
 #include "routing/StaticRouteProvider.h"
 
 #include <arpa/inet.h>
-#include <atomic>
-#include <csignal>
 #include <iostream>
 #include <memory>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <thread>
-
-std::atomic<bool> running(true);
-
-void handleSigint(int) {
-  std::cout << "\n[System] Caught SIGINT, exiting...\n";
-  running = false;
-}
 
 std::string extractDstIp(const std::vector<uint8_t> &packet) {
   const struct iphdr *iph =
@@ -45,9 +36,6 @@ bool isFromLan(const std::string &ip) {
 }
 
 int main() {
-  // 注册 SIGINT 处理器
-  std::signal(SIGINT, handleSigint);
-
   PacketCapture cap;
   if (!cap.init("tun0"))
     return 1;
@@ -73,24 +61,21 @@ int main() {
   std::cout << "[Router] System started.\n";
 
   std::thread rawListener([&]() {
-    while (running) {
+    while (true) {
       auto rawPkt = cap.readRawPacket();
       if (!rawPkt)
         continue;
       auto dnatted = nat.applyDNAT(*rawPkt);
       cap.writeToTun(dnatted);
     }
-    std::cout << "[RawListener] Exit.\n";
   });
 
   int tunFd = cap.getTunFd();
 
-  while (running) {
+  while (true) {
     struct pollfd pfd = {tunFd, POLLIN, 0};
     int ret = poll(&pfd, 1, 100);
     if (ret < 0) {
-      if (errno == EINTR && !running)
-        break;
       perror("poll");
       continue;
     }
@@ -113,6 +98,7 @@ int main() {
                   << dstIp << "\n";
         continue;
       }
+
       if (!qos.allow(*packet)) {
         std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
         continue;
@@ -134,7 +120,5 @@ int main() {
 
   dynamicRouter->stop();
   rawListener.join();
-
-  std::cout << "[Router] Exit complete.\n";
   return 0;
 }
