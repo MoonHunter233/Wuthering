@@ -82,12 +82,9 @@ int main() {
 
   while (true) {
     std::vector<struct pollfd> pfds;
-
-    // 监视 TUN 设备
     pfds.push_back({tunFd, POLLIN, 0});
-
-    // 监视每个 relay 的 socket fd
     std::vector<std::string> keys;
+
     for (auto &[key, relay] : relayMap) {
       int fd = relay->getSocketFd();
       if (fd >= 0) {
@@ -102,7 +99,6 @@ int main() {
       continue;
     }
 
-    // TUN 接收到新包
     if (pfds[0].revents & POLLIN) {
       auto packet = cap.readPacket();
       if (!packet)
@@ -121,6 +117,7 @@ int main() {
                   << dstIp << "\n";
         continue;
       }
+
       if (!qos.allow(*packet)) {
         std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
         continue;
@@ -136,14 +133,20 @@ int main() {
         std::cout << "[Router] <<< " << srcIp << "\n";
         auto snatted = nat.applySNAT(*packet);
 
-        uint16_t dstPort = 0;
+        const iphdr *snatIp = reinterpret_cast<const iphdr *>(snatted.data());
+        uint16_t dstPort = 0, relaySrcPort = 0;
+        std::string relaySrcIp;
+
         if (proto == IPPROTO_TCP &&
-            packet->size() >= iph->ihl * 4 + sizeof(tcphdr)) {
-          auto *tcp =
-              reinterpret_cast<const tcphdr *>(packet->data() + iph->ihl * 4);
+            snatted.size() >= snatIp->ihl * 4 + sizeof(tcphdr)) {
+          auto *tcp = reinterpret_cast<const tcphdr *>(snatted.data() +
+                                                       snatIp->ihl * 4);
           dstPort = ntohs(tcp->dest);
+          relaySrcPort = ntohs(tcp->source);
         }
-        std::string key = makeRelayKey(dstIp, dstPort, proto);
+
+        relaySrcIp = inet_ntoa(*(in_addr *)&snatIp->saddr);
+        std::string key = makeRelayKey(relaySrcIp, relaySrcPort, proto);
 
         if (relayMap.find(key) == relayMap.end()) {
           auto relay = std::make_unique<TcpRelay>(dstIp, dstPort, nat, key);
@@ -160,7 +163,6 @@ int main() {
       }
     }
 
-    // 检查 relay 中的 socket 是否有数据返回
     for (size_t i = 1; i < pfds.size(); ++i) {
       if (pfds[i].revents & POLLIN) {
         auto &relay = relayMap[keys[i - 1]];
