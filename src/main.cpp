@@ -111,9 +111,9 @@ int main() {
           continue;
         }
         auto snatted = nat.applySNAT(*packet);
-        cap.writeToTun(snatted);
+        cap.writePacket(snatted);
       } else {
-        cap.writeToTun(*packet);
+        cap.writePacket(*packet);
       }
     }
   }
