@@ -3,6 +3,7 @@ set -e
 
 TUN_NAME="tun0"
 OUT_IF="wlan0"
+TUN_IP="192.168.99.1/24"
 
 echo "[+] 创建 TUN 接口 $TUN_NAME"
 
@@ -14,7 +15,8 @@ echo "[+] 创建 TUN 接口 $TUN_NAME"
 
 # 创建 TUN 接口
 sudo ip tuntap add dev $TUN_NAME mode tun
-
+# 添加 ip
+sudo ip addr add $TUN_IP dev $TUN_NAME
 # 启用接口（无需设置 IP）
 sudo ip link set $TUN_NAME up
 
