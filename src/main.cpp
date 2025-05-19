@@ -93,7 +93,8 @@ int main() {
       auto snatted = nat.applySNAT(*packet);
       cap.writePacket(snatted);
     } else {
-      cap.writePacket(*packet);
+      auto dnatted = nat.applyDNAT(*packet);
+      cap.writePacket(dnatted);
     }
   }
 
