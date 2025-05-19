@@ -7,6 +7,7 @@
 #include "routing/StaticRouteProvider.h"
 
 #include <arpa/inet.h>
+#include <atomic>
 #include <csignal>
 #include <iostream>
 #include <memory>
@@ -36,12 +37,13 @@ bool isFromLan(const std::string &ip) {
          ip.rfind("172.", 0) == 0;
 }
 
-volatile bool running = true;
-void handle_signal(int) { running = false; }
+std::atomic<bool> running(true);
+
+void handleSignal(int sig) { running = false; }
 
 int main() {
-  signal(SIGINT, handle_signal);
-  signal(SIGTERM, handle_signal);
+  signal(SIGINT, handleSignal);
+  signal(SIGTERM, handleSignal);
 
   PacketCapture cap;
   if (!cap.init("tun0"))
@@ -70,15 +72,10 @@ int main() {
   std::thread rawListener([&]() {
     while (running) {
       auto rawPkt = cap.readRawPacket();
-      if (!rawPkt) {
-        std::cerr << "[RawListener] readRawPacket failed\n";
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      if (!rawPkt)
         continue;
-      }
       auto dnatted = nat.applyDNAT(*rawPkt);
-      if (!cap.writeToTun(dnatted)) {
-        std::cerr << "[RawListener] Failed to write DNAT packet to tun\n";
-      }
+      cap.writeToTun(dnatted);
     }
   });
 
@@ -88,8 +85,10 @@ int main() {
     struct pollfd pfd = {tunFd, POLLIN, 0};
     int ret = poll(&pfd, 1, 100);
     if (ret < 0) {
+      if (errno == EINTR)
+        continue;
       perror("poll");
-      continue;
+      break;
     }
 
     if (pfd.revents & POLLIN) {
@@ -122,18 +121,15 @@ int main() {
           continue;
         }
         auto snatted = nat.applySNAT(*packet);
-        if (!cap.writePacket(snatted)) {
-          std::cerr << "[Error] Failed to send SNAT packet\n";
-        }
+        cap.writePacket(snatted);
       } else {
-        if (!cap.writePacket(*packet)) {
-          std::cerr << "[Error] Failed to send LAN packet\n";
-        }
+        cap.writePacket(*packet);
       }
     }
   }
 
   dynamicRouter->stop();
   rawListener.join();
+  std::cout << "Gracefully exited.\n" << std::endl;
   return 0;
 }
