@@ -16,6 +16,13 @@
 #include <poll.h>
 #include <thread>
 
+std::atomic<bool> running(true);
+
+void handleSignal(int signum) {
+  std::cout << "\n[Signal] Caught signal " << signum << ", exiting...\n";
+  running = false;
+}
+
 std::string extractDstIp(const std::vector<uint8_t> &packet) {
   const struct iphdr *iph =
       reinterpret_cast<const struct iphdr *>(packet.data());
@@ -37,13 +44,8 @@ bool isFromLan(const std::string &ip) {
          ip.rfind("172.", 0) == 0;
 }
 
-std::atomic<bool> running(true);
-
-void handleSignal(int sig) { running = false; }
-
 int main() {
   signal(SIGINT, handleSignal);
-  signal(SIGTERM, handleSignal);
 
   PacketCapture cap;
   if (!cap.init("tun0"))
@@ -109,6 +111,7 @@ int main() {
                   << dstIp << "\n";
         continue;
       }
+
       if (!qos.allow(*packet)) {
         std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
         continue;
@@ -120,6 +123,7 @@ int main() {
           std::cout << "[Router] No route for " << dstIp << "\n";
           continue;
         }
+
         auto snatted = nat.applySNAT(*packet);
         cap.writePacket(snatted);
       } else {
@@ -130,6 +134,5 @@ int main() {
 
   dynamicRouter->stop();
   rawListener.join();
-  std::cout << "Gracefully exited.\n" << std::endl;
-  return 0;
-}
+  std::cout << "[Router] Exited cleanly.\n";
+  return 0
