@@ -3,6 +3,7 @@
 #include "core/RoutingManager.h"
 #include "firewall/Firewall.h"
 #include "nat/NATManager.h"
+#include "relay/TcpRelay.h"
 #include "routing/DynamicRouteProvider.h"
 #include "routing/StaticRouteProvider.h"
 
@@ -13,6 +14,7 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <thread>
+#include <unordered_map>
 
 std::string extractDstIp(const std::vector<uint8_t> &packet) {
   const struct iphdr *iph =
@@ -37,7 +39,7 @@ bool isFromLan(const std::string &ip) {
 
 int main() {
   PacketCapture cap;
-  if (!cap.init("veth-host"))
+  if (!cap.init("tun0"))
     return 1;
 
   RoutingManager router;
@@ -46,7 +48,7 @@ int main() {
   router.addProvider(staticRouter);
 
   auto dynamicRouter =
-      std::make_shared<DynamicRouteProvider>("veth-host", "192.168.99.1");
+      std::make_shared<DynamicRouteProvider>("tun0", "192.168.99.1");
   dynamicRouter->start();
   router.addProvider(dynamicRouter);
 
@@ -58,46 +60,114 @@ int main() {
   QoSManager qos;
   qos.loadRules("config/qos.rules");
 
+  std::unordered_map<std::string, std::unique_ptr<TcpRelay>> relayMap;
   std::cout << "[Router] System started.\n";
 
+  std::thread rawListener([&]() {
+    while (true) {
+      auto rawPkt = cap.readRawPacket();
+      if (!rawPkt)
+        continue;
+      auto dnatted = nat.applyDNAT(*rawPkt);
+      cap.writeToTun(dnatted);
+    }
+  });
+
+  int tunFd = cap.getTunFd();
+
   while (true) {
-    auto packet = cap.readPacket();
-    if (!packet)
-      continue;
-
-    std::string srcIp = extractSrcIp(*packet);
-    std::string dstIp = extractDstIp(*packet);
-    const struct iphdr *iph =
-        reinterpret_cast<const struct iphdr *>(packet->data());
-    uint8_t proto = iph->protocol;
-
-    std::cout << "[Cap] From " << srcIp << " to " << dstIp << "\n";
-
-    if (!firewall.allow(*packet)) {
-      std::cout << "[Firewall] Blocked packet from " << srcIp << " to " << dstIp
-                << "\n";
-      continue;
+    std::vector<struct pollfd> pfds;
+    pfds.push_back({tunFd, POLLIN, 0});
+    std::vector<std::string> keys;
+    for (auto &[key, relay] : relayMap) {
+      int fd = relay->getSocketFd();
+      if (fd >= 0) {
+        pfds.push_back({fd, POLLIN, 0});
+        keys.push_back(key);
+      }
     }
-    if (!qos.allow(*packet)) {
-      std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
+
+    int ret = poll(pfds.data(), pfds.size(), 100);
+    if (ret < 0) {
+      perror("poll");
       continue;
     }
 
-    if (isFromLan(srcIp) && !isFromLan(dstIp)) {
-      auto route = router.lookupRoute(dstIp);
-      if (!route) {
-        std::cout << "[Router] No route for " << dstIp << "\n";
+    if (pfds[0].revents & POLLIN) {
+      auto packet = cap.readPacket();
+      if (!packet)
+        continue;
+
+      std::string srcIp = extractSrcIp(*packet);
+      std::string dstIp = extractDstIp(*packet);
+      const struct iphdr *iph =
+          reinterpret_cast<const struct iphdr *>(packet->data());
+      uint8_t proto = iph->protocol;
+
+      std::cout << "[Cap] From " << srcIp << " to " << dstIp << "\n";
+
+      if (!firewall.allow(*packet)) {
+        std::cout << "[Firewall] Blocked packet from " << srcIp << " to "
+                  << dstIp << "\n";
+        continue;
+      }
+      if (!qos.allow(*packet)) {
+        std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
         continue;
       }
 
-      auto snatted = nat.applySNAT(*packet);
-      cap.writePacket(snatted);
-    } else {
-      auto dnatted = nat.applyDNAT(*packet);
-      cap.writePacket(dnatted);
+      if (proto == IPPROTO_TCP && isFromLan(srcIp) && !isFromLan(dstIp)) {
+        auto route = router.lookupRoute(dstIp);
+        if (!route) {
+          std::cout << "[Router] No route for " << dstIp << "\n";
+          continue;
+        }
+
+        uint16_t dstPort = 0;
+        if (packet->size() >= iph->ihl * 4 + sizeof(tcphdr)) {
+          auto *tcp =
+              reinterpret_cast<const tcphdr *>(packet->data() + iph->ihl * 4);
+          dstPort = ntohs(tcp->dest);
+
+          std::string key = dstIp + ":" + std::to_string(dstPort);
+          if (relayMap.find(key) == relayMap.end()) {
+            auto relay = std::make_unique<TcpRelay>(dstIp, dstPort);
+            if (!relay->isConnected()) {
+              std::cout << "[Relay] Failed to connect to " << dstIp << ":"
+                        << dstPort << "\n";
+              continue;
+            }
+            relayMap[key] = std::move(relay);
+          }
+
+          size_t ipHeaderLen = iph->ihl * 4;
+          size_t tcpHeaderLen = tcp->doff * 4;
+          size_t payloadOffset = ipHeaderLen + tcpHeaderLen;
+          const uint8_t *payload = packet->data() + payloadOffset;
+          size_t payloadLen = packet->size() - payloadOffset;
+          relayMap[key]->sendPayload({payload, payload + payloadLen});
+        }
+      } else {
+        cap.writePacket(*packet);
+      }
+    }
+
+    for (size_t i = 1; i < pfds.size(); ++i) {
+      if (pfds[i].revents & POLLIN) {
+        auto &relay = relayMap[keys[i - 1]];
+        auto back = relay->receivePayload();
+        if (back) {
+          cap.writePacket(*back);
+        } else {
+          std::cout << "[Relay] Connection closed or failed for key: "
+                    << keys[i - 1] << ", removing.\n";
+          relayMap.erase(keys[i - 1]);
+        }
+      }
     }
   }
 
   dynamicRouter->stop();
+  rawListener.join();
   return 0;
 }
