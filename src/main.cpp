@@ -23,6 +23,7 @@ std::string extractDstIp(const std::vector<uint8_t> &packet) {
   dst.s_addr = iph->daddr;
   return std::string(inet_ntoa(dst));
 }
+
 std::string extractSrcIp(const std::vector<uint8_t> &packet) {
   const struct iphdr *iph =
       reinterpret_cast<const struct iphdr *>(packet.data());
@@ -30,12 +31,10 @@ std::string extractSrcIp(const std::vector<uint8_t> &packet) {
   src.s_addr = iph->saddr;
   return std::string(inet_ntoa(src));
 }
+
 bool isFromLan(const std::string &ip) {
   return ip.rfind("192.168.", 0) == 0 || ip.rfind("10.", 0) == 0 ||
          ip.rfind("172.", 0) == 0;
-}
-std::string makeRelayKey(const std::string &ip, uint16_t port, uint8_t proto) {
-  return ip + ":" + std::to_string(port) + ":" + std::to_string(proto);
 }
 
 int main() {
@@ -117,21 +116,21 @@ int main() {
         continue;
       }
 
-      // 只处理 LAN -> WAN 的 TCP 流量
       if (proto == IPPROTO_TCP && isFromLan(srcIp) && !isFromLan(dstIp)) {
         auto route = router.lookupRoute(dstIp);
         if (!route) {
           std::cout << "[Router] No route for " << dstIp << "\n";
           continue;
         }
-        // 解析目标端口
+
         uint16_t dstPort = 0;
         if (packet->size() >= iph->ihl * 4 + sizeof(tcphdr)) {
           auto *tcp =
               reinterpret_cast<const tcphdr *>(packet->data() + iph->ihl * 4);
           dstPort = ntohs(tcp->dest);
         }
-        std::string key = makeRelayKey(dstIp, dstPort, proto);
+
+        std::string key = dstIp + ":" + std::to_string(dstPort);
 
         if (relayMap.find(key) == relayMap.end()) {
           auto relay = std::make_unique<TcpRelay>(dstIp, dstPort);
@@ -142,8 +141,6 @@ int main() {
           }
           relayMap[key] = std::move(relay);
         }
-        // 这里只需透传 TCP payload（或按你设计整个 IP
-        // 包透传也可以，建议只送应用数据）
         relayMap[key]->sendPayload(*packet);
       } else {
         cap.writePacket(*packet);
