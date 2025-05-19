@@ -135,4 +135,5 @@ int main() {
   dynamicRouter->stop();
   rawListener.join();
   std::cout << "[Router] Exited cleanly.\n";
-  return 0
+  return 0;
+}
