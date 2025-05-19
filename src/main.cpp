@@ -111,7 +111,7 @@ int main() {
           continue;
         }
         auto snatted = nat.applySNAT(*packet);
-        cap.writePacket(snatted);
+        cap.sendViaInterface(snatted, route->gateway, route->iface);
       } else {
         cap.writePacket(*packet);
       }
