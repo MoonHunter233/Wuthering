@@ -3,44 +3,27 @@
 #include <fcntl.h>
 #include <iostream>
 #include <linux/if_ether.h>
-#include <linux/if_tun.h>
+#include <linux/if_packet.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
-#include <netpacket/packet.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 bool PacketCapture::init(const std::string &devName) {
-  tunFd_ = open("/dev/net/tun", O_RDWR);
-  if (tunFd_ < 0) {
-    perror("open /dev/net/tun");
-    return false;
-  }
-
-  struct ifreq ifr {};
-  ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
-  std::strncpy(ifr.ifr_name, devName.c_str(), IFNAMSIZ);
-
-  if (ioctl(tunFd_, TUNSETIFF, &ifr) < 0) {
-    perror("ioctl TUNSETIFF");
-    close(tunFd_);
-    return false;
-  }
-
-  // 创建 raw socket 用于回包监听
+  // 创建 raw socket
   rawFd_ = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IP));
   if (rawFd_ < 0) {
     perror("socket rawFd_");
     return false;
   }
 
-  // 可选绑定网卡
+  // 绑定到指定接口（例如 veth-host）
   struct sockaddr_ll sll = {};
   sll.sll_family = AF_PACKET;
   sll.sll_protocol = htons(ETH_P_IP);
-  sll.sll_ifindex = if_nametoindex("wlan0"); // 监听 wlan0
+  sll.sll_ifindex = if_nametoindex(devName.c_str());
   if (sll.sll_ifindex == 0 ||
       bind(rawFd_, (struct sockaddr *)&sll, sizeof(sll)) < 0) {
     perror("bind rawFd_");
@@ -49,21 +32,12 @@ bool PacketCapture::init(const std::string &devName) {
   }
 
   ifName_ = devName;
-  std::cout << "[PacketCapture] Created TUN device: " << ifName_ << std::endl;
+  std::cout << "[PacketCapture] Bound to raw interface: " << ifName_
+            << std::endl;
   return true;
 }
 
 std::optional<std::vector<uint8_t>> PacketCapture::readPacket() {
-  uint8_t buffer[2000];
-  int len = read(tunFd_, buffer, sizeof(buffer));
-  if (len < 0) {
-    perror("read tunFd");
-    return std::nullopt;
-  }
-  return std::vector<uint8_t>(buffer, buffer + len);
-}
-
-std::optional<std::vector<uint8_t>> PacketCapture::readRawPacket() {
   uint8_t buffer[2000];
   int len = recvfrom(rawFd_, buffer, sizeof(buffer), 0, nullptr, nullptr);
   if (len < 0) {
@@ -94,11 +68,4 @@ bool PacketCapture::writePacket(const std::vector<uint8_t> &packet) {
   return sent == (int)packet.size();
 }
 
-bool PacketCapture::writeToTun(const std::vector<uint8_t> &packet) {
-  int written = write(tunFd_, packet.data(), packet.size());
-  return written == (int)packet.size();
-}
-
 std::string PacketCapture::getInterfaceName() const { return ifName_; }
-
-int PacketCapture::getTunFd() const { return tunFd_; }
