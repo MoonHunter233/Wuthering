@@ -23,7 +23,6 @@ std::string extractDstIp(const std::vector<uint8_t> &packet) {
   dst.s_addr = iph->daddr;
   return std::string(inet_ntoa(dst));
 }
-
 std::string extractSrcIp(const std::vector<uint8_t> &packet) {
   const struct iphdr *iph =
       reinterpret_cast<const struct iphdr *>(packet.data());
@@ -31,12 +30,10 @@ std::string extractSrcIp(const std::vector<uint8_t> &packet) {
   src.s_addr = iph->saddr;
   return std::string(inet_ntoa(src));
 }
-
 bool isFromLan(const std::string &ip) {
   return ip.rfind("192.168.", 0) == 0 || ip.rfind("10.", 0) == 0 ||
          ip.rfind("172.", 0) == 0;
 }
-
 std::string makeRelayKey(const std::string &ip, uint16_t port, uint8_t proto) {
   return ip + ":" + std::to_string(port) + ":" + std::to_string(proto);
 }
@@ -61,7 +58,6 @@ int main() {
 
   Firewall firewall;
   firewall.loadRules("config/firewall.rules");
-
   QoSManager qos;
   qos.loadRules("config/qos.rules");
 
@@ -84,7 +80,6 @@ int main() {
     std::vector<struct pollfd> pfds;
     pfds.push_back({tunFd, POLLIN, 0});
     std::vector<std::string> keys;
-
     for (auto &[key, relay] : relayMap) {
       int fd = relay->getSocketFd();
       if (fd >= 0) {
@@ -117,39 +112,29 @@ int main() {
                   << dstIp << "\n";
         continue;
       }
-
       if (!qos.allow(*packet)) {
         std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
         continue;
       }
 
-      if (isFromLan(srcIp) && !isFromLan(dstIp)) {
+      // 只处理 LAN -> WAN 的 TCP 流量
+      if (proto == IPPROTO_TCP && isFromLan(srcIp) && !isFromLan(dstIp)) {
         auto route = router.lookupRoute(dstIp);
         if (!route) {
           std::cout << "[Router] No route for " << dstIp << "\n";
           continue;
         }
-
-        std::cout << "[Router] <<< " << srcIp << "\n";
-        auto snatted = nat.applySNAT(*packet);
-
-        const iphdr *snatIp = reinterpret_cast<const iphdr *>(snatted.data());
-        uint16_t dstPort = 0, relaySrcPort = 0;
-        std::string relaySrcIp;
-
-        if (proto == IPPROTO_TCP &&
-            snatted.size() >= snatIp->ihl * 4 + sizeof(tcphdr)) {
-          auto *tcp = reinterpret_cast<const tcphdr *>(snatted.data() +
-                                                       snatIp->ihl * 4);
+        // 解析目标端口
+        uint16_t dstPort = 0;
+        if (packet->size() >= iph->ihl * 4 + sizeof(tcphdr)) {
+          auto *tcp =
+              reinterpret_cast<const tcphdr *>(packet->data() + iph->ihl * 4);
           dstPort = ntohs(tcp->dest);
-          relaySrcPort = ntohs(tcp->source);
         }
-
-        relaySrcIp = inet_ntoa(*(in_addr *)&snatIp->saddr);
-        std::string key = makeRelayKey(relaySrcIp, relaySrcPort, proto);
+        std::string key = makeRelayKey(dstIp, dstPort, proto);
 
         if (relayMap.find(key) == relayMap.end()) {
-          auto relay = std::make_unique<TcpRelay>(dstIp, dstPort, nat, key);
+          auto relay = std::make_unique<TcpRelay>(dstIp, dstPort);
           if (!relay->isConnected()) {
             std::cout << "[Relay] Failed to connect to " << dstIp << ":"
                       << dstPort << "\n";
@@ -157,7 +142,9 @@ int main() {
           }
           relayMap[key] = std::move(relay);
         }
-        relayMap[key]->sendPayload(snatted);
+        // 这里只需透传 TCP payload（或按你设计整个 IP
+        // 包透传也可以，建议只送应用数据）
+        relayMap[key]->sendPayload(*packet);
       } else {
         cap.writePacket(*packet);
       }
