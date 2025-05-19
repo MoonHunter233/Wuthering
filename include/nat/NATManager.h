@@ -15,7 +15,7 @@ struct NATEntry {
 
 class NATManager {
 public:
-  void setPublicIp(const std::string &ip);
+  void setPublicIp(const std::string &iface);
   std::string getPublicIp();
 
   std::vector<uint8_t> applySNAT(const std::vector<uint8_t> &packet);

@@ -51,7 +51,7 @@ int main() {
   router.addProvider(dynamicRouter);
 
   NATManager nat;
-  nat.setPublicIp("192.168.137.153");
+  nat.setPublicIp("wlan0");
 
   Firewall firewall;
   firewall.loadRules("config/firewall.rules");

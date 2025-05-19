@@ -1,14 +1,33 @@
 #include "nat/NATManager.h"
 #include <arpa/inet.h>
 #include <cstring>
+#include <ifaddrs.h>
 #include <iostream>
+#include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 
 static uint16_t ipChecksum(void *vdata, size_t length);
 
-void NATManager::setPublicIp(const std::string &ip) { publicIp_ = ip; }
+void NATManager::setPublicIp(const std::string &iface) {
+  struct ifaddrs *ifAddrStruct = nullptr;
+  getifaddrs(&ifAddrStruct);
+  for (struct ifaddrs *ifa = ifAddrStruct; ifa != nullptr;
+       ifa = ifa->ifa_next) {
+    if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_INET &&
+        iface == ifa->ifa_name) {
+      void *addr = &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr;
+      char ipStr[INET_ADDRSTRLEN];
+      inet_ntop(AF_INET, addr, ipStr, INET_ADDRSTRLEN);
+      freeifaddrs(ifAddrStruct);
+      publicIp_ = std::string(ipStr);
+      return;
+    }
+  }
+  freeifaddrs(ifAddrStruct);
+  publicIp_ = "127.0.0.1";
+}
 
 uint16_t NATManager::allocateExternalPort() {
   static uint16_t port = 40000;
