@@ -128,20 +128,29 @@ int main() {
           auto *tcp =
               reinterpret_cast<const tcphdr *>(packet->data() + iph->ihl * 4);
           dstPort = ntohs(tcp->dest);
-        }
 
-        std::string key = dstIp + ":" + std::to_string(dstPort);
-
-        if (relayMap.find(key) == relayMap.end()) {
-          auto relay = std::make_unique<TcpRelay>(dstIp, dstPort);
-          if (!relay->isConnected()) {
-            std::cout << "[Relay] Failed to connect to " << dstIp << ":"
-                      << dstPort << "\n";
-            continue;
+          std::string key = dstIp + ":" + std::to_string(dstPort);
+          if (relayMap.find(key) == relayMap.end()) {
+            auto relay = std::make_unique<TcpRelay>(dstIp, dstPort);
+            if (!relay->isConnected()) {
+              std::cout << "[Relay] Failed to connect to " << dstIp << ":"
+                        << dstPort << "\n";
+              continue;
+            }
+            relayMap[key] = std::move(relay);
           }
-          relayMap[key] = std::move(relay);
+
+          size_t ipHeaderLen = iph->ihl * 4;
+          size_t tcpHeaderLen = tcp->doff * 4;
+          size_t payloadOffset = ipHeaderLen + tcpHeaderLen;
+          if (packet->size() > payloadOffset) {
+            const uint8_t *payload = packet->data() + payloadOffset;
+            size_t payloadLen = packet->size() - payloadOffset;
+            relayMap[key]->sendPayload({payload, payload + payloadLen});
+          } else {
+            std::cout << "[Relay] Empty TCP payload, skip.\n";
+          }
         }
-        relayMap[key]->sendPayload(*packet);
       } else {
         cap.writePacket(*packet);
       }
