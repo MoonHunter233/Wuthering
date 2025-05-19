@@ -110,6 +110,8 @@ int main() {
           std::cout << "[Router] No route for " << dstIp << "\n";
           continue;
         }
+        std::cout << "[Router] Route to " << dstIp << " via " << route->gateway
+                  << " on " << route->iface << "\n";
         auto snatted = nat.applySNAT(*packet);
         cap.sendViaInterface(snatted, route->gateway, route->iface);
       } else {
