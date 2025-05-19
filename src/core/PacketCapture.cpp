@@ -99,6 +99,38 @@ bool PacketCapture::writeToTun(const std::vector<uint8_t> &packet) {
   return written == (int)packet.size();
 }
 
+bool PacketCapture::sendViaInterface(const std::vector<uint8_t> &packet,
+                                     const std::string &gateway,
+                                     const std::string &iface) {
+  int sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+  if (sock < 0) {
+    perror("socket");
+    return false;
+  }
+
+  int one = 1;
+  setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one));
+
+  // 绑定到指定接口
+  if (setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, iface.c_str(),
+                 iface.length()) < 0) {
+    perror("setsockopt BINDTODEVICE");
+    close(sock);
+    return false;
+  }
+
+  struct sockaddr_in dst {};
+  const struct iphdr *ip =
+      reinterpret_cast<const struct iphdr *>(packet.data());
+  dst.sin_family = AF_INET;
+  dst.sin_addr.s_addr = ip->daddr; // 直接发送到目标 IP 即可
+
+  int sent = sendto(sock, packet.data(), packet.size(), 0,
+                    (struct sockaddr *)&dst, sizeof(dst));
+  close(sock);
+  return sent == (int)packet.size();
+}
+
 std::string PacketCapture::getInterfaceName() const { return ifName_; }
 
 int PacketCapture::getTunFd() const { return tunFd_; }

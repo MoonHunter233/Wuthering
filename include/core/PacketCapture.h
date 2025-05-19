@@ -12,6 +12,8 @@ public:
   bool
   writePacket(const std::vector<uint8_t> &packet); // 发往外网（raw socket）
   bool writeToTun(const std::vector<uint8_t> &packet); // 写回 TUN（发回客户端）
+  bool sendViaInterface(const std::vector<uint8_t> &packet,
+                        const std::string &gateway, const std::string &iface);
   std::string getInterfaceName() const;
   int getTunFd() const;
 
