@@ -143,13 +143,9 @@ int main() {
           size_t ipHeaderLen = iph->ihl * 4;
           size_t tcpHeaderLen = tcp->doff * 4;
           size_t payloadOffset = ipHeaderLen + tcpHeaderLen;
-          if (packet->size() > payloadOffset) {
-            const uint8_t *payload = packet->data() + payloadOffset;
-            size_t payloadLen = packet->size() - payloadOffset;
-            relayMap[key]->sendPayload({payload, payload + payloadLen});
-          } else {
-            std::cout << "[Relay] Empty TCP payload, skip.\n";
-          }
+          const uint8_t *payload = packet->data() + payloadOffset;
+          size_t payloadLen = packet->size() - payloadOffset;
+          relayMap[key]->sendPayload({payload, payload + payloadLen});
         }
       } else {
         cap.writePacket(*packet);
