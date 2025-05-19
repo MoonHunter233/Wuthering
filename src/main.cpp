@@ -18,8 +18,8 @@
 
 std::atomic<bool> running(true);
 
-void handleSignal(int signum) {
-  std::cout << "\n[Signal] Caught signal " << signum << ", exiting...\n";
+void handleSigint(int) {
+  std::cout << "\n[System] Caught SIGINT, exiting...\n";
   running = false;
 }
 
@@ -45,7 +45,8 @@ bool isFromLan(const std::string &ip) {
 }
 
 int main() {
-  signal(SIGINT, handleSignal);
+  // 注册 SIGINT 处理器
+  std::signal(SIGINT, handleSigint);
 
   PacketCapture cap;
   if (!cap.init("tun0"))
@@ -79,6 +80,7 @@ int main() {
       auto dnatted = nat.applyDNAT(*rawPkt);
       cap.writeToTun(dnatted);
     }
+    std::cout << "[RawListener] Exit.\n";
   });
 
   int tunFd = cap.getTunFd();
@@ -87,10 +89,10 @@ int main() {
     struct pollfd pfd = {tunFd, POLLIN, 0};
     int ret = poll(&pfd, 1, 100);
     if (ret < 0) {
-      if (errno == EINTR)
-        continue;
+      if (errno == EINTR && !running)
+        break;
       perror("poll");
-      break;
+      continue;
     }
 
     if (pfd.revents & POLLIN) {
@@ -111,7 +113,6 @@ int main() {
                   << dstIp << "\n";
         continue;
       }
-
       if (!qos.allow(*packet)) {
         std::cout << "[QoS] Rate limited packet from " << srcIp << "\n";
         continue;
@@ -123,7 +124,6 @@ int main() {
           std::cout << "[Router] No route for " << dstIp << "\n";
           continue;
         }
-
         auto snatted = nat.applySNAT(*packet);
         cap.writePacket(snatted);
       } else {
@@ -134,6 +134,7 @@ int main() {
 
   dynamicRouter->stop();
   rawListener.join();
-  std::cout << "[Router] Exited cleanly.\n";
+
+  std::cout << "[Router] Exit complete.\n";
   return 0;
 }
